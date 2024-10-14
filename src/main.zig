@@ -156,10 +156,24 @@ const Ray = struct {
         return self.origin.add(self.direction.mul_scalar(t));
     }
 };
+
 pub fn main() !void {
+    // Image
     const aspect_ratio = 16.0 / 9.0;
     const image_width: u32 = 512;
     const image_height: u32 = @intFromFloat(@as(f64, @floatFromInt(image_width)) / aspect_ratio);
+
+    // Camera
+    var focal_length: f64 = 1.0;
+    var viewport_height: f64 = 2.0;
+    var viewport_width: f64 = viewport_height * @as(f64, @floatFromInt(image_width)) / @as(f64, @floatFromInt(image_height));
+    var camera_center = Point3(0, 0, 0);
+
+    var viewport_u = Vec3.init(viewport_width, 0, 0);
+    var viewport_v = Vec3.init(0, -viewport_height, 0);
+
+    var viewport_upper_left = camera_center.sub(Vec3.init(0, 0, focal_length)).sub(viewport_u.div(2)).sub(viewport_v.div(2));
+    var pixel00_loc = viewport_upper_left.sum()
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();

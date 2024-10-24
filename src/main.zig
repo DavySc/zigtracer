@@ -129,6 +129,10 @@ const Vec3 = struct {
         const zd: f64 = u.data[1] * v.data[0] - u.data[1] * v.data[0];
         return init(xd, yd, zd);
     }
+
+    pub fn unit_vector(v: *const Vec3) Vec3 {
+        return v.div(v.length());
+    }
 };
 
 const Point3 = Vec3;
@@ -136,9 +140,9 @@ const Color3 = Vec3;
 
 pub fn color3_to_color(c: Color3) Color {
     return Color{ .rgb = RGB{
-        .r = @intFromFloat(c.x()),
-        .g = @intFromFloat(c.y()),
-        .b = @intFromFloat(c.z()),
+        .r = @intFromFloat(c.x() * 255.99),
+        .g = @intFromFloat(c.y() * 255.99),
+        .b = @intFromFloat(c.z() * 255.99),
     } };
 }
 
@@ -157,23 +161,41 @@ const Ray = struct {
     }
 };
 
+pub fn hit_sphere(center: Point3, radius: f64, ray: Ray) bool {
+    const oc = center.sub(ray.origin);
+    const a = ray.direction.dot(ray.direction);
+    const b = -2.0 * ray.direction.dot(oc);
+    const c = oc.dot(oc) - radius * radius;
+    const discriminant = b * b - 4 * a * c;
+    return discriminant >= 0;
+}
+
+pub fn ray_color(ray: Ray) Color3 {
+    if (hit_sphere(Point3.init(0, 0, -1), 0.5, ray)) return Color3.init(1, 0, 0);
+    const unit_direction: Vec3 = ray.direction.unit_vector();
+    const a: f64 = 0.5 * (unit_direction.y() + 1.0);
+    return Color3.init(1.0, 1.0, 1.0).mul_scalar(1.0 - a).add(Color3.init(0.5, 0.7, 1.0).mul_scalar(a));
+}
+
 pub fn main() !void {
     // Image
     const aspect_ratio = 16.0 / 9.0;
     const image_width: u32 = 512;
     const image_height: u32 = @intFromFloat(@as(f64, @floatFromInt(image_width)) / aspect_ratio);
 
-    // Camera
-    var focal_length: f64 = 1.0;
-    var viewport_height: f64 = 2.0;
-    var viewport_width: f64 = viewport_height * @as(f64, @floatFromInt(image_width)) / @as(f64, @floatFromInt(image_height));
-    var camera_center = Point3(0, 0, 0);
+    // camera
+    const focal_length: f64 = 1.0;
+    const viewport_height: f64 = 2.0;
+    const viewport_width: f64 = viewport_height * @as(f64, @floatFromInt(image_width)) / @as(f64, @floatFromInt(image_height));
+    var camera_center = Point3.init(0, 0, 0);
 
     var viewport_u = Vec3.init(viewport_width, 0, 0);
     var viewport_v = Vec3.init(0, -viewport_height, 0);
 
+    var pixel_delta_u = viewport_u.div(@floatFromInt(image_width));
+    var pixel_delta_v = viewport_v.div(@floatFromInt(image_height));
     var viewport_upper_left = camera_center.sub(Vec3.init(0, 0, focal_length)).sub(viewport_u.div(2)).sub(viewport_v.div(2));
-    var pixel00_loc = viewport_upper_left.sum()
+    var pixel00_loc = viewport_upper_left.add(pixel_delta_u.add(pixel_delta_v.mul_scalar(0.5)));
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
@@ -186,12 +208,10 @@ pub fn main() !void {
         std.log.info("\rScanlines remaining: {}", .{image_height - j});
         var i: u32 = 0;
         while (i < image_width) : (i += 1) {
-            const r: f64 = @as(f64, @floatFromInt(i)) / @as(f64, (image_width - 1));
-            const g: f64 = @as(f64, @floatFromInt(j)) / @as(f64, (image_height - 1));
-            const b: f64 = 0;
-
-            var col = Color3.init(r, g, b);
-            col = col.mul_scalar(255.999);
+            var pixel_center = pixel00_loc.add(pixel_delta_u.mul_scalar(@floatFromInt(i))).add(pixel_delta_v.mul_scalar(@floatFromInt(j)));
+            const ray_diretion = pixel_center.sub(camera_center);
+            const ray = Ray.init(camera_center, ray_diretion);
+            const col = ray_color(ray);
 
             const index: u32 = i + j * image_width;
             ppm.data[index] = color3_to_color(col);

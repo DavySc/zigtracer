@@ -161,17 +161,97 @@ const Ray = struct {
     }
 };
 
-pub fn hit_sphere(center: Point3, radius: f64, ray: Ray) bool {
+const HitRecord = struct {
+    point: Point3,
+    normal: Vec3,
+    t: f64,
+    front_face: bool,
+
+    fn set_face_normal(self: *HitRecord, ray: Ray, outward_normal: Vec3) void {
+        self.front_face = ray.direction.dot(outward_normal) < 0;
+        self.normal = if (self.front_face) outward_normal else outward_normal.negate();
+    }
+};
+
+const Hittable = struct {
+    ptr: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        hit: *const fn (ctx: *anyopaque, ray: Ray, ray_tmin: f64, ray_tmax: f64, hit_record: *HitRecord, ret_addr: usize) bool,
+    };
+
+    pub fn rawHit(self: Hittable, ray: Ray, ray_tmin: f64, ray_tmax: f64, hit_record: *HitRecord, ret_addr: usize) bool {
+        return self.vtable.hit(self.ptr, ray, ray_tmin, ray_tmax, hit_record, ret_addr);
+    }
+};
+
+const Sphere = struct {
+    center: Point3,
+    radius: f64,
+    pub fn init(center: Point3, radius: f64) Sphere {
+        return Sphere{ .center = center, .radius = radius };
+    }
+
+    pub fn hit(ctx: *anyopaque, ray: Ray, ray_tmin: f64, ray_tmax: f64, hit_record: *HitRecord, ret_addr: usize) bool {
+        _ = ret_addr;
+        const self: *Sphere = @ptrCast(@alignCast(ctx));
+        const oc = ray.origin.sub(self.center);
+        const a = ray.direction.length_squared();
+        const h = oc.dot(ray.direction);
+        const c = oc.length_squared() - self.radius * self.radius;
+
+        const discriminant = h * h - a * c;
+
+        if (discriminant < 0) {
+            return false;
+        }
+        const sqrtd = std.math.sqrt(discriminant);
+
+        var root = (h - sqrtd) / a;
+        if (root <= ray_tmin or ray_tmax <= root) {
+            root = (h + sqrtd) / a;
+            if (root <= ray_tmin or ray_tmax <= root) {
+                return false;
+            }
+        }
+        hit_record.t = root;
+        hit_record.point = ray.at(root);
+        hit_record.normal = (hit_record.point.sub(self.center).divEq(self.radius));
+        hit_record.outward_normal = hit_record.point.sub(self.center).divEq(self.radius);
+        hit_record.set_face_normal(ray, hit_record.outward_normal);
+        return true;
+    }
+
+    pub fn hittable(self: *Sphere) Hittable {
+        return .{
+            .ptr = self,
+            .vtable = &.{
+                .hit = hit,
+            },
+        };
+    }
+};
+
+pub fn hit_sphere(center: Point3, radius: f64, ray: Ray) f64 {
     const oc = center.sub(ray.origin);
-    const a = ray.direction.dot(ray.direction);
-    const b = -2.0 * ray.direction.dot(oc);
-    const c = oc.dot(oc) - radius * radius;
-    const discriminant = b * b - 4 * a * c;
-    return discriminant >= 0;
+    const a = ray.direction.length_squared();
+    const h = ray.direction.dot(oc);
+    const c = oc.length_squared() - radius * radius;
+    const discriminant = h * h - a * c;
+
+    return if (discriminant < 0)
+        -1.0
+    else
+        (h - std.math.sqrt(discriminant)) / a;
 }
 
 pub fn ray_color(ray: Ray) Color3 {
-    if (hit_sphere(Point3.init(0, 0, -1), 0.5, ray)) return Color3.init(1, 0, 0);
+    const t = hit_sphere(Point3.init(0, 0, -1), 0.5, ray);
+    if (t > 0.0) {
+        const normal_vector = ray.at(t).sub(Point3.init(0, 0, -1)).unit_vector();
+        return Color3.init(normal_vector.x() + 1.0, normal_vector.y() + 1.0, normal_vector.z() + 1.0).mul_scalar(0.5);
+    }
     const unit_direction: Vec3 = ray.direction.unit_vector();
     const a: f64 = 0.5 * (unit_direction.y() + 1.0);
     return Color3.init(1.0, 1.0, 1.0).mul_scalar(1.0 - a).add(Color3.init(0.5, 0.7, 1.0).mul_scalar(a));
